@@ -1,0 +1,9 @@
+<launch>
+<!-- start world and launch gazebo -->
+  <include file="$(find mavros)/launch/px4.launch">
+    <arg name="fcu_url" value="udp://:14540@192.168.1.36:14557"/>
+  </include>
+
+<node pkg="mavgnc" type="mission_square" name="aa"/>
+
+</launch>

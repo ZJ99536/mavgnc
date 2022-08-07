@@ -1,0 +1,10 @@
+<launch>
+<!-- start world and launch gazebo -->
+  <include file="$(find mavros)/launch/px4.launch">
+    <arg name="fcu_url" value="udp://:14540@192.168.1.36:14557"/>
+  </include>
+
+<node pkg="mavgnc" type="position_ctrl" name="aa" output="screen"/>
+<!-- <node pkg="rqt_multiplot" type="rqt_multiplot" name="node_rqt" output="screen"/> -->
+
+</launch>
