@@ -57,6 +57,7 @@ from mavros_msgs.msg import AttitudeTarget
 from mavgnc.mavgnc_base import MavGNCBase
 from time import time
 import geometry_msgs
+from mavgnc.dronecontrol_ff import DroneControl_feed_foward
 
 
 class MavGNCPositionControl(MavGNCBase):
@@ -88,6 +89,7 @@ class MavGNCPositionControl(MavGNCBase):
         self.att_setpoint_euler = Vector3Stamped()
         self.attitude_euler = Vector3Stamped()
 
+        self.ff_controller = DroneControl_feed_foward("/home/zhoujin/rainsunny_ws/src/Mavfast/src/dataset/8_shape1.csv")
 
         self.current_position = np.array((3,))
         self.current_velocity= np.array((3,))
@@ -96,6 +98,12 @@ class MavGNCPositionControl(MavGNCBase):
         self.hp = np.array((3,))
         self.status = 'Hover'
         self.flag = 0
+
+        self.pos_ff = 0
+        self.vel_ff = 0
+        self.thrust_ff = 0
+        self.att_ff = 0
+        self.rate_ff = 0
 
         self.phi_cmd = 0.0
         self.theta_cmd = 0.0
@@ -306,29 +314,33 @@ class MavGNCPositionControl(MavGNCBase):
 
     def velocity_control(self):
         position_cmd = np.array([self.position_setpoint.pose.position.x,self.position_setpoint.pose.position.y,self.position_setpoint.pose.position.z])
+        position_cmd = self.pos_ff
         pos_err = position_cmd - self.current_position
         self.pos_err_sum += pos_err * 1.0/self.loop_freq
         velocity_cmd = np.array([self.velocity_setpoint.twist.linear.x,self.velocity_setpoint.twist.linear.y,self.velocity_setpoint.twist.linear.z])
+        position_cmd = self.vel_ff
         vel_err = velocity_cmd - self.current_velocity
         self.vel_err_sum += vel_err * 1.0/self.loop_freq
-        ts = self.ts
-        ta = np.array([42*ts**5, 30*ts**4, 20*ts**3, 12*ts**2, 6*ts, 2, 0, 0])
-        aref = np.zeros(3)
-        aref[0] = np.dot(ta, self.ax)
-        aref[1] = np.dot(ta, self.ay)
-        aref[2] = np.dot(ta, self.az)
-        #print(error)
-        # print(aref)
+
         phi = self.current_attitude[0]
         theta = self.current_attitude[1]
         psi = self.current_attitude[2]
         R_E_B = np.array([[cos(psi),sin(psi),0],[-sin(psi),cos(psi),0],[0,0,1]])
         vel_err = R_E_B@vel_err
+
+        phi = self.att_ff[0]
+        theta = self.att_ff[1]
+        psi = self.att_ff[2]
         K_pos = np.array([[self.k_p_fb,0,0],[0,self.k_p_fb,0],[0,0,self.k_p_fb]])
         K_vel = np.array([[2,0,0],[0,2,0],[0,0,2]])
-        ades = aref + self.g*np.array([0,0,1]) + K_pos @ pos_err + K_vel @ vel_err
-                              
+        R_E_B = np.array([[cos(theta)*cos(psi),cos(theta)*sin(psi),-sin(theta)],\
+                          [sin(phi)*sin(theta)*cos(psi)-cos(phi)*sin(psi),sin(phi)*sin(theta)*sin(psi)+cos(phi)*cos(psi),sin(phi)*cos(theta)],\
+                          [cos(phi)*sin(theta)*cos(psi)+sin(phi)*sin(psi),cos(phi)*sin(theta)*sin(psi)-sin(phi)*cos(psi),cos(phi)*cos(theta)]])
+        aref = R_E_B.transpose() @ np.array([0.0,0.0,self.thrust_ff]) - self.g*np.array([0,0,1])
+        ades = aref + self.g*np.array([0,0,1]) + K_pos @ pos_err + K_vel @ vel_err                
         acc_des = ades
+        if acc_des[2] < 0.1:
+            acc_des[2] = 0.1
         acc_des[0] += self.ki_vx * self.vel_err_sum[0] + self.kd_vx * (vel_err[0] - self.vel_err_last_step[0])*self.loop_freq
         acc_des[0] += self.ki_x * self.pos_err_sum[0] + self.kd_x * (pos_err[0] - self.pos_err_last_step[0])*self.loop_freq
         acc_des[1] += self.ki_vy * self.vel_err_sum[1] + self.kd_vy * (vel_err[1] - self.vel_err_last_step[1])*self.loop_freq
@@ -339,52 +351,19 @@ class MavGNCPositionControl(MavGNCBase):
         y_c = np.array([-sin(psi),cos(psi),0])
         x_b_des = np.cross(y_c,z_b_des) / np.linalg.norm(np.cross(y_c,z_b_des))
         y_b_des = np.cross(z_b_des,x_b_des)
-        
-        # R_E_B = np.array([x_b_des,y_b_des,z_b_des])
-        # self.att.orientation = Quaternion(*quaternion_from_matrix(R_E_B))
         R_E_B = np.transpose(np.array([x_b_des,y_b_des,z_b_des]))
-
         self.psi_cmd = atan2(R_E_B[1,0],R_E_B[0,0])
         self.theta_cmd = asin(-R_E_B[2,0])
         self.phi_cmd = atan(R_E_B[2,1]/R_E_B[2,2])
         self.thrust_cmd = np.linalg.norm(acc_des)*0.68/self.g
 
-          
-        # self.thrust_cmd = (np.dot(acc_des, z_b_des) + self.ki_vz * self.vel_err_sum[2] + self.kd_vz * (vel_err[2] - self.vel_err_last_step[2])*self.loop_freq)*0.68/self.g      
-        # self.thrust_cmd = 0.68 + self.kp_vz * vel_err[2] + self.ki_vz * self.vel_err_sum[2] + self.kd_vz * (vel_err[2] - self.vel_err_last_step[2])*self.loop_freq
-        
-        # self.theta_cmd += self.kd_vx * (vel_err[0] - self.vel_err_last_step[0])*self.loop_freq
-        # self.phi_cmd += self.kd_vy * (vel_err[1] - self.vel_err_last_step[1])*self.loop_freq
-
         self.theta_cmd = self.bound(self.theta_cmd,-0.42,0.42)
         self.phi_cmd = self.bound(self.phi_cmd,-0.62,0.62)
         self.thrust_cmd = self.bound(self.thrust_cmd,0,0.9)
 
-        psi = 0
-        yc = np.array([-sin(psi),cos(psi),0])
-        tj = np.array([210*ts**4, 120*ts**3, 60*ts**2, 24*ts, 6, 0, 0, 0])
-        xj = np.dot(tj, self.ax)
-        yj = np.dot(tj, self.ay)
-        zj = np.dot(tj, self.az)
-        j = np.zeros(3)
-        j[0] = xj
-        j[1] = yj
-        j[2] = zj
-        alpha = aref + self.g*np.array([0,0,1])
-        xb = np.cross(yc,alpha)
-        # print(xb)
-        xb = xb / np.linalg.norm(xb)
-        yb = np.cross(alpha,xb)
-        yb = yb / np.linalg.norm(yb)
-        zb = np.cross(xb, yb)
-        c = np.dot(zb, alpha)
-        w = np.zeros(3)
-        w[0] = -np.dot(yb,j)/c
-        w[1] = np.dot(xb,j)/c
-        w[2] = w[1]*np.dot(yc,zb)/np.linalg.norm(np.cross(yc,zb))
         att_cmd = np.array([self.phi_cmd,self.theta_cmd,self.psi_cmd])
         w_fb = self.k_p_att_euler * (att_cmd - self.current_attitude)
-        w_cmd = w + w_fb
+        w_cmd = self.rate_ff + w_fb
         self.att.orientation = Quaternion(*quaternion_from_euler(self.phi_cmd,self.theta_cmd,self.psi_cmd))
         self.att.thrust = self.thrust_cmd
         self.att.body_rate.x = w_cmd[0]
@@ -408,15 +387,9 @@ class MavGNCPositionControl(MavGNCBase):
 
 
     def position_control(self):
-        # position_cmd = np.array([self.position_setpoint.pose.position.x,self.position_setpoint.pose.position.y,self.position_setpoint.pose.position.z])
-        # pos_err = position_cmd - self.current_position
-        # print(self.current_position)
-        ts = self.ts
-        tv = np.array([7*ts**6, 6*ts**5, 5*ts**4, 4*ts**3, 3*ts**2, 2*ts, 1, 0])
-        self.velocity_setpoint.twist.linear.x = np.dot(tv, self.ax)
-        self.velocity_setpoint.twist.linear.y = np.dot(tv, self.ay)
-        self.velocity_setpoint.twist.linear.z = np.dot(tv, self.az)
-
+        self.velocity_setpoint.twist.linear.x = self.vel_ff[0]
+        self.velocity_setpoint.twist.linear.y = self.vel_ff[1]
+        self.velocity_setpoint.twist.linear.z = self.vel_ff[2]
         self.velocity_setpoint.header.stamp = rospy.Time.now()  
         self.velocity_setpoint.header.frame_id = 'odom'
 
@@ -430,123 +403,13 @@ class MavGNCPositionControl(MavGNCBase):
         return data
 
     def planner(self):
-        curren_t = self.current_t
-        # print(curren_t)
-        if self.tempi < len(self.tsa)-1 and curren_t > self.tsa[self.tempi+1]:
-            self.tempi = self.tempi + 1
-        self.ax = np.zeros(8)
-        self.ay = np.zeros(8)
-        self.az = np.zeros(8)            
-        if self.tempi < len(self.tsa)-1:
-            if self.tempi == 0:
-                for i in range(5):
-                    # print(i)
-                    self.ax[i+3] = self.polyx[i]
-                    self.ay[i+3] = self.polyy[i]
-                    self.az[i+3] = self.polyz[i]
-            elif self.tempi == len(self.tsa)-2:
-                for i in range(5):
-                    self.ax[i+3] = self.polyx[i-5]
-                    self.ay[i+3] = self.polyy[i-5]
-                    self.az[i+3] = self.polyz[i-5]
-            else:
-                for i in range(4):
-                    self.ax[i+4] = self.polyx[self.tempi*4+1+i]
-                    self.ay[i+4] = self.polyy[self.tempi*4+1+i]
-                    self.az[i+4] = self.polyz[self.tempi*4+1+i]
-        else:
-            self.ax = np.array([0,0,0,0,0,0,0,self.endx])
-            self.ay = np.array([0,0,0,0,0,0,0,self.endy])
-            self.az = np.array([0,0,0,0,0,0,0,self.endz])
-
-        self.ts = curren_t - self.tsa[self.tempi]
-        ts = self.ts
-        t = np.array([ts**7, ts**6, ts**5, ts**4, ts**3, ts**2, ts, 1])
-        self.position_setpoint.pose.position.x = np.dot(t, self.ax)
-        self.position_setpoint.pose.position.y = np.dot(t, self.ay)
-        self.position_setpoint.pose.position.z = np.dot(t, self.az)
-
+        self.pos_ff,self.vel_ff,self.thrust_ff,self.att_ff,self.rate_ff,is_done = self.ff_controller.set_forwardcontrol(self.current_t)
+        
+        self.position_setpoint.pose.position.x = self.pos_ff[0]
+        self.position_setpoint.pose.position.y = self.pos_ff[1]
+        self.position_setpoint.pose.position.z = self.pos_ff[2]
         self.position_setpoint.header.stamp = rospy.Time.now() 
         self.position_setpoint.header.frame_id = 'odom'
-
-        
-        # self.position_setpoint.pose.position.x = self.waypoints[self.waypoints_pointer,0] 
-        # self.position_setpoint.pose.position.y = self.waypoints[self.waypoints_pointer,1] 
-        # self.position_setpoint.pose.position.z = self.waypoints[self.waypoints_pointer,2] 
-
-        # if np.linalg.norm(self.current_position-self.waypoints[self.waypoints_pointer]) < 0.1:
-        #     self.waypoints_pointer += 1
-        #     if self.waypoints_pointer == self.waypoints.shape[0]:
-        #         self.waypoints_pointer = 0
-
-    def plan(self, waypointx, waypointy, waypointz):
-        self.endx = waypointx[-1]
-        self.endy = waypointy[-1]
-        self.endz = waypointz[-1]
-        # print(self.endx, self.endy, self.endz)
-        self.n_seg = len(waypointx)-1
-        # print(self.n_seg)
-        self.init_ts(waypointx, waypointy, waypointz)     
-        
-        self.polyx = self.trajPlanning(self.tss, waypointx) 
-        self.polyy = self.trajPlanning(self.tss, waypointy)
-        self.polyz = self.trajPlanning(self.tss, waypointz)
-
-        # print(self.polyx.shape)
-
-
-    def init_ts(self, waypointx, waypointy, waypointz):
-        # to be ++++++++++++++++++
-        self.tss = np.ones(self.n_seg) * 2.2
-        # for i in range(1,len(self.tss)):
-        #     t1 = abs(waypointx[i+1]-waypointx[i]) / self.vxmax
-        #     t2 = abs(waypointy[i+1]-waypointy[i]) / self.vymax
-        #     t3 = abs(waypointz[i+1]-waypointz[i]) / self.vzmax
-        #     self.tss[i] = max(t1,max(t2,t3))
-        self.tss[0] = 10
-        self.tsa = np.zeros(self.n_seg+1)
-        for i in range(1, len(self.tsa)):
-            self.tsa[i] = self.tsa[i-1] + self.tss[i-1]
-
-    def trajPlanning(self, t, p):
-        xMatrix = np.zeros((4*len(t)+2,1))
-        for i in range(len(p)-1):
-            xMatrix[i,0] = p[i]
-            xMatrix[len(t)+i,0] = p[i+1]
-
-        tMatrix = np.zeros((4*len(t)+2,4*len(t)+2)) 
-        tMatrix[0,4] = 1 #p0(0)
-        tMatrix[len(t)-1,-1] = 1 #pn(0)
-        for j in range(5):
-            tMatrix[len(t),j] = t[0]**(4-j) #p0(t)
-            tMatrix[2*len(t)-1,-1-j] = t[-1]**j #pn(t)
-        for i in range(1,len(t)-1):
-            tMatrix[i,4*(i+1)] = 1 #pi(0)
-            for j in range(4):
-                tMatrix[len(t)+i,4*i+1+j] = t[i]**(3-j) #pi(t)
-
-        for j in range(5):
-            tMatrix[2*len(t),j] = (4-j)*t[0]**(3-j) #v0(t)
-            tMatrix[3*len(t)-2,-2] = -1 #-vn(0)
-            tMatrix[3*len(t)-1,j] = (4-j)*(3-j)*t[0]**(3-j) #a0(t)
-            tMatrix[4*len(t)-3,-3] = -2 #-an(0)
-        for i in range(1,len(t)-1):
-            tMatrix[2*len(t)+i-1,4*i+3] = -1 #vi(0)
-            tMatrix[3*len(t)+i-2,4*i+2] = -2 #-ai(0)
-            for j in range(4):
-                tMatrix[2*len(t)+i,i*4+j+1] = (3-j)*t[i]**(2-j) #vi(t)
-                tMatrix[3*len(t)+i-1,i*4+j+1] = (3-j)*(2-j)*t[i]**(1-j) #vi(t)
-
-        tMatrix[-4,3] = 1 #v0
-        tMatrix[-3,2] = 2 #a0
-        for j in range(5):
-            tMatrix[-2,j-5] = (4-j)*t[-1]**(3-j) #vt
-            tMatrix[-1,j-5] = (4-j)*(3-j)*t[-1]**(2-j) #at
-
-        kMatrix = np.matmul(np.linalg.inv(tMatrix),xMatrix)
-        return kMatrix
-
-
 
 
 
