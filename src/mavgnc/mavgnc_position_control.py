@@ -155,7 +155,7 @@ class MavGNCPositionControl(MavGNCBase):
         self.cut_seg = 6
         self.eight_turns = 2
         self.eight_ax = 10
-        self.eight_ay = 16
+        self.eight_ay = 15
         self.eight_t = 2*np.pi/self.cut_seg
         self.start_t = 0
         self.current_t = 0
