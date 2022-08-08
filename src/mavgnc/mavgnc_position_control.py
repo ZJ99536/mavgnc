@@ -116,15 +116,15 @@ class MavGNCPositionControl(MavGNCBase):
         self.ki_z = 0
 
         self.kd_x = 0.01
-        self.kd_y = 0.01
+        self.kd_y = 0.015
         self.kd_z = 0
 
         self.ki_vx = 0.1
-        self.ki_vy = 0.1
+        self.ki_vy = 0.15
         self.ki_vz = 0.2
 
         self.kd_vx = 0.1
-        self.kd_vy = 0.1
+        self.kd_vy = 0.15
         self.kd_vz = 0
 
         self.vel_err_sum = np.zeros(3)
@@ -152,10 +152,10 @@ class MavGNCPositionControl(MavGNCBase):
         self.endy = 0
         self.endz = 0
 
-        self.cut_seg = 10
-        self.eight_turns = 5
-        self.eight_ax = 2
-        self.eight_ay = 3
+        self.cut_seg = 6
+        self.eight_turns = 2
+        self.eight_ax = 10
+        self.eight_ay = 16
         self.eight_t = 2*np.pi/self.cut_seg
         self.start_t = 0
         self.current_t = 0
@@ -165,9 +165,9 @@ class MavGNCPositionControl(MavGNCBase):
         self.k_v_fb = 3.5
         self.k_p_att_euler = [5, 5, 5]
 
-        self.vxmax = 1.1
-        self.vymax = 1.1
-        self.vzmax = 1.1
+        self.vxmax = 3.5
+        self.vymax = 3.5
+        self.vzmax = 3.5
 
 
         self.att_thread = Thread(target=self.send_att, args=())
@@ -219,12 +219,12 @@ class MavGNCPositionControl(MavGNCBase):
         for i in range(self.cut_seg):
             x[i+1] = self.eight_ax*cos(self.eight_t*i)/(1+sin(self.eight_t*i)*sin(self.eight_t*i))
             y[i+1] = self.eight_ay*cos(self.eight_t*i)*sin(self.eight_t*i)/(1+sin(self.eight_t*i)*sin(self.eight_t*i))
-            z[i+1] = 1.5
+            z[i+1] = 4.5
         for i in range(1,self.eight_turns):
             for j in range(self.cut_seg):
                 x[i*self.cut_seg+1+j] = x[j+1]
                 y[i*self.cut_seg+1+j] = y[j+1]
-                z[i*self.cut_seg+1+j] = 1.5
+                z[i*self.cut_seg+1+j] = 4.5
         self.plan(x,y,z)
         # # self.plan([0,5,5],[0,0,2],[0,2,3])
         # self.plan([0,5,5,8,10],[0,0,2,-3,0],[0,2,3,7,8])
@@ -449,12 +449,12 @@ class MavGNCPositionControl(MavGNCBase):
 
     def init_ts(self, waypointx, waypointy, waypointz):
         # to be ++++++++++++++++++
-        self.tss = np.ones(self.n_seg)        
-        for i in range(1,len(self.tss)):
-            t1 = abs(waypointx[i+1]-waypointx[i]) / self.vxmax
-            t2 = abs(waypointy[i+1]-waypointy[i]) / self.vymax
-            t3 = abs(waypointz[i+1]-waypointz[i]) / self.vzmax
-            self.tss[i] = max(t1,max(t2,t3))
+        self.tss = np.ones(self.n_seg) * 2.2
+        # for i in range(1,len(self.tss)):
+        #     t1 = abs(waypointx[i+1]-waypointx[i]) / self.vxmax
+        #     t2 = abs(waypointy[i+1]-waypointy[i]) / self.vymax
+        #     t3 = abs(waypointz[i+1]-waypointz[i]) / self.vzmax
+        #     self.tss[i] = max(t1,max(t2,t3))
         self.tss[0] = 10
         self.tsa = np.zeros(self.n_seg+1)
         for i in range(1, len(self.tsa)):
