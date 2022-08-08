@@ -88,24 +88,23 @@ class MavGNCPositionControl(MavGNCBase):
         self.att_setpoint_euler = Vector3Stamped()
         self.attitude_euler = Vector3Stamped()
 
-        self.waypoints =np.array([[0.0,0.0,15],[15.0,0.0,5],[15.0,20.0,10],[0.0,5.0,20]])
-        self.waypoints_pointer = 0
-
-
-        """
-        self.velocity_setpoint.twist.linear.x = 0.3
-        self.velocity_setpoint.twist.linear.y = 0.3
-        self.velocity_setpoint.twist.linear.z = 0.3
-        """
 
         self.current_position = np.array((3,))
         self.current_velocity= np.array((3,))
         self.current_attitude = np.array((3,))
 
+        self.hp = np.array((3,))
+        self.status = 'Hover'
+        self.flag = 0
+
         self.phi_cmd = 0.0
         self.theta_cmd = 0.0
         self.psi_cmd = 0.0
         self.thrust_cmd = 0.0
+
+        self.kp_x = 1.2
+        self.kp_y = 1.2 
+        self.kp_z = 1.0 
 
         self.kp_vx = 0.3
         self.kp_vy = -0.3
@@ -180,13 +179,11 @@ class MavGNCPositionControl(MavGNCBase):
         self.current_time = Float32()
         self.current_time.data = .0
 
-        self.flag = 1
 
 
 
     def odometry_cb(self,data):
         self.current_position = np.array([data.pose.pose.position.x,data.pose.pose.position.y,data.pose.pose.position.z])
-        # print(self.current_position)
         self.current_velocity = np.array([data.twist.twist.linear.x,data.twist.twist.linear.y,data.twist.twist.linear.z])
         self.current_attitude = np.array(euler_from_quaternion([data.pose.pose.orientation.x,data.pose.pose.orientation.y,data.pose.pose.orientation.z,data.pose.pose.orientation.w]))
         
@@ -213,39 +210,90 @@ class MavGNCPositionControl(MavGNCBase):
 
 
     def run(self):
-        x = np.zeros(self.cut_seg*self.eight_turns+1)
-        y = np.zeros(self.cut_seg*self.eight_turns+1)
-        z = np.zeros(self.cut_seg*self.eight_turns+1)
-        for i in range(self.cut_seg):
-            x[i+1] = self.eight_ax*cos(self.eight_t*i)/(1+sin(self.eight_t*i)*sin(self.eight_t*i))
-            y[i+1] = self.eight_ay*cos(self.eight_t*i)*sin(self.eight_t*i)/(1+sin(self.eight_t*i)*sin(self.eight_t*i))
-            z[i+1] = 4.5
-        for i in range(1,self.eight_turns):
-            for j in range(self.cut_seg):
-                x[i*self.cut_seg+1+j] = x[j+1]
-                y[i*self.cut_seg+1+j] = y[j+1]
-                z[i*self.cut_seg+1+j] = 4.5
-        self.plan(x,y,z)
-        # # self.plan([0,5,5],[0,0,2],[0,2,3])
-        # self.plan([0,5,5,8,10],[0,0,2,-3,0],[0,2,3,7,8])
-
         while True:
             self.current_time.data = time()-self.time_init
             self.time_pub.publish(self.current_time)
             if not self.ready_to_takeoff:
                 self.takeoff_preparation()
             else:
-                if self.flag:
+                if self.status == 'Hover':
+                    self.is_at_setpoint()
+                    self.position_control_fb()
+                    self.velocity_control_fb()
                     self.start_t = time()
-                    self.flag = 0
-                self.current_t = time()-self.start_t
-                self.planner()
-                self.position_control()
-                self.velocity_control()
+                else:
+                    self.current_t = time()-self.start_t
+                    self.planner()
+                    self.position_control()
+                    self.velocity_control()
 
             self.loop_rate.sleep()
 
+    def is_at_setpoint(self):
+        self.position_setpoint.pose.position.x = 0
+        self.position_setpoint.pose.position.y = 0
+        self.position_setpoint.pose.position.z = 2   
 
+        self.hp = np.array([self.position_setpoint.pose.position.x,self.position_setpoint.pose.position.y,self.position_setpoint.pose.position.z])
+        dis = self.current_position - self.hp
+        
+        if np.linalg.norm(dis) < 0.1:
+            self.status = 'Planning'
+        else:
+            self.status = 'Hover'
+
+    def position_control_fb(self):
+        position_cmd = np.array([self.position_setpoint.pose.position.x,self.position_setpoint.pose.position.y,self.position_setpoint.pose.position.z])
+        pos_err = position_cmd - self.current_position
+
+        self.velocity_setpoint.twist.linear.x = self.kp_x * pos_err[0]
+        self.velocity_setpoint.twist.linear.y = self.kp_y * pos_err[1]
+        self.velocity_setpoint.twist.linear.z = self.kp_z * pos_err[2]
+
+        self.position_setpoint.header.stamp = rospy.Time.now() 
+        self.position_setpoint.header.frame_id = 'odom'
+        self.velocity_setpoint.header.stamp = rospy.Time.now()  
+        self.velocity_setpoint.header.frame_id = 'odom'
+
+        self.psi_cmd = 0.0
+
+    def velocity_control_fb(self):
+        velocity_cmd = np.array([self.velocity_setpoint.twist.linear.x,self.velocity_setpoint.twist.linear.y,self.velocity_setpoint.twist.linear.z])
+        vel_err = velocity_cmd - self.current_velocity
+
+        psi = self.current_attitude[2]
+        
+        R_E_B = np.array([[cos(psi),sin(psi),0],[-sin(psi),cos(psi),0],[0,0,1]])
+        vel_err = R_E_B@vel_err
+
+        self.vel_err_sum += vel_err * 1.0/self.loop_freq
+        
+        self.thrust_cmd = 0.68 + self.kp_vz * vel_err[2] + self.ki_vz * self.vel_err_sum[2] + self.kd_vz * (vel_err[2] - self.vel_err_last_step[2])*self.loop_freq
+        if self.thrust_cmd >= 1:
+            self.thrust_cmd = 0.99
+        elif self.thrust_cmd <= 0:
+            self.thrust_cmd = 0.01
+
+        self.theta_cmd = self.kp_vx * vel_err[0] + self.kd_vx * (vel_err[0] - self.vel_err_last_step[0])*self.loop_freq
+        self.phi_cmd = self.kp_vy * vel_err[1] + self.kd_vy * (vel_err[1] - self.vel_err_last_step[1])*self.loop_freq
+        
+        self.att.orientation = Quaternion(*quaternion_from_euler(self.phi_cmd,self.theta_cmd,self.psi_cmd))
+        self.att.thrust = self.thrust_cmd
+        self.att.header.stamp = rospy.Time.now()
+        self.att.body_rate = Vector3()
+        self.att.type_mask = 7 # ignore rate
+
+        self.att_setpoint_euler.vector.x = self.phi_cmd/3.14*180
+        self.att_setpoint_euler.vector.y = self.theta_cmd/3.14*180
+        self.att_setpoint_euler.vector.z = self.psi_cmd/3.14*180
+        self.att_setpoint_euler.header.stamp = rospy.Time.now()
+
+        self.attitude_euler.vector.x = self.current_attitude[0]/3.14*180
+        self.attitude_euler.vector.y = self.current_attitude[1]/3.14*180
+        self.attitude_euler.vector.z = self.current_attitude[2]/3.14*180
+        self.attitude_euler.header.stamp = rospy.Time.now()
+
+        self.vel_err_last_step = vel_err
 
     def takeoff_preparation(self):
         # make sure the simulation is ready to start the mission
