@@ -120,19 +120,19 @@ class MavGNCPositionControl(MavGNCBase):
 
         self.ki_x = 0
         self.ki_y = 0
-        self.ki_z = 0
+        self.ki_z = 0.1
 
-        self.kd_x = 0
-        self.kd_y = 0
-        self.kd_z = 0
+        self.kd_x = 0.01
+        self.kd_y = 0.015
+        self.kd_z = 0.015
 
         self.ki_vx = 0.1
-        self.ki_vy = 0.1
-        self.ki_vz = 0.1
+        self.ki_vy = 0.15
+        self.ki_vz = 0.2
 
-        self.kd_vx = 0
-        self.kd_vy = 0
-        self.kd_vz = 0
+        self.kd_vx = 0.1
+        self.kd_vy = 0.15
+        self.kd_vz = 0.1
 
         self.vel_err_sum = np.zeros(3)
         self.vel_err_last_step = np.zeros(3)
@@ -218,9 +218,7 @@ class MavGNCPositionControl(MavGNCBase):
 
 
     def run(self):
-        while True:
-            self.current_time.data = time()-self.time_init
-            self.time_pub.publish(self.current_time)
+        while True:            
             if not self.ready_to_takeoff:
                 self.takeoff_preparation()
             else:
@@ -231,10 +229,11 @@ class MavGNCPositionControl(MavGNCBase):
                     self.start_t = time()
                 else:
                     self.current_t = time()-self.start_t
+                    self.current_time.data = self.current_t
                     self.planner()
                     self.position_control()
                     self.velocity_control()
-
+            self.time_pub.publish(self.current_time)
             self.loop_rate.sleep()
 
     def is_at_setpoint(self):
@@ -344,15 +343,15 @@ class MavGNCPositionControl(MavGNCBase):
         aref = R_E_B.transpose() @ np.array([0.0,0.0,self.thrust_ff]) - self.g*np.array([0,0,1])
         ades = aref + self.g*np.array([0,0,1]) + K_pos @ pos_err + K_vel @ vel_err                
         acc_des = ades
-        print(acc_des)
+        # print(acc_des)
         acc_des[0] += self.ki_vx * self.vel_err_sum[0] + self.kd_vx * (vel_err[0] - self.vel_err_last_step[0])*self.loop_freq
         acc_des[0] += self.ki_x * self.pos_err_sum[0] + self.kd_x * (pos_err[0] - self.pos_err_last_step[0])*self.loop_freq
         acc_des[1] += self.ki_vy * self.vel_err_sum[1] + self.kd_vy * (vel_err[1] - self.vel_err_last_step[1])*self.loop_freq
         acc_des[1] += self.ki_y * self.pos_err_sum[1] + self.kd_y * (pos_err[1] - self.pos_err_last_step[1])*self.loop_freq
         acc_des[2] += self.ki_vz * self.vel_err_sum[2] + self.kd_vz * (vel_err[2] - self.vel_err_last_step[2])*self.loop_freq
         acc_des[2] += self.ki_z * self.pos_err_sum[2] + self.kd_z * (pos_err[2] - self.pos_err_last_step[2])*self.loop_freq
-        if acc_des[2] < 0.1:
-            acc_des[2] = 0.1
+        if acc_des[2] < 0.01:
+            acc_des[2] = 0.01
         z_b_des = np.array(acc_des / np.linalg.norm(acc_des))
         y_c = np.array([-sin(psi),cos(psi),0])
         x_b_des = np.cross(y_c,z_b_des) / np.linalg.norm(np.cross(y_c,z_b_des))
@@ -367,8 +366,8 @@ class MavGNCPositionControl(MavGNCBase):
         self.phi_cmd = self.bound(self.phi_cmd,-0.62,0.62)
         self.thrust_cmd = self.bound(self.thrust_cmd,0,0.95)
 
-        if abs(self.psi_cmd) > 1:
-            print(acc_des)
+        # if abs(self.psi_cmd) > 1:
+        #     print(acc_des)
 
         att_cmd = np.array([self.phi_cmd,self.theta_cmd,self.psi_cmd])
         w_fb = self.k_p_att_euler * (att_cmd - self.current_attitude)
