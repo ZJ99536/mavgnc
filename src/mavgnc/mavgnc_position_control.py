@@ -89,7 +89,8 @@ class MavGNCPositionControl(MavGNCBase):
         self.att_setpoint_euler = Vector3Stamped()
         self.attitude_euler = Vector3Stamped()
 
-        self.ff_controller = DroneControl_feed_foward("/home/zhoujin/rainsunny_ws/src/Mavfast/src/dataset/8_shape1.csv")
+        # self.ff_controller = DroneControl_feed_foward("/home/zhoujin/rainsunny_ws/src/Mavfast/src/dataset/8_shape1.csv")
+        self.ff_controller = DroneControl_feed_foward("/home/zhoujin/Mavfast/src/dataset/8_shape_planning1.csv")
 
         self.current_position = np.array((3,))
         self.current_velocity= np.array((3,))
@@ -281,8 +282,8 @@ class MavGNCPositionControl(MavGNCBase):
         elif self.thrust_cmd <= 0:
             self.thrust_cmd = 0.01
 
-        self.theta_cmd = self.kp_vx * vel_err[0] + self.kd_vx * (vel_err[0] - self.vel_err_last_step[0])*self.loop_freq
-        self.phi_cmd = self.kp_vy * vel_err[1] + self.kd_vy * (vel_err[1] - self.vel_err_last_step[1])*self.loop_freq
+        self.theta_cmd = self.kp_vx * vel_err[0]
+        self.phi_cmd = self.kp_vy * vel_err[1]
         
         self.att.orientation = Quaternion(*quaternion_from_euler(self.phi_cmd,self.theta_cmd,self.psi_cmd))
         self.att.thrust = self.thrust_cmd
