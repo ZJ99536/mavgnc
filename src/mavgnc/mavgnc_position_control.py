@@ -89,8 +89,9 @@ class MavGNCPositionControl(MavGNCBase):
         self.att_setpoint_euler = Vector3Stamped()
         self.attitude_euler = Vector3Stamped()
 
-        # self.ff_controller = DroneControl_feed_foward("/home/zhoujin/rainsunny_ws/src/Mavfast/src/dataset/8_shape1.csv")
-        self.ff_controller = DroneControl_feed_foward("/home/zhoujin/Mavfast/src/dataset/8_shape_planning1.csv")
+        # self.ff_controller = DroneControl_feed_foward("/home/zhoujin/Mavfast/src/dataset/8_shape_planning1.csv")
+        # self.ff_controller = DroneControl_feed_foward("/home/zhoujin/Mavfast/src/dataset/yoz_planning.csv")
+        self.ff_controller = DroneControl_feed_foward("/home/zhoujin/Downloads/8_shape.csv")
 
         self.current_position = np.array((3,))
         self.current_velocity= np.array((3,))
@@ -135,6 +136,18 @@ class MavGNCPositionControl(MavGNCBase):
         self.kd_vy = 0.15
         self.kd_vz = 0.1
 
+        self.ki_x = 0
+        self.ki_y = 0
+        self.kd_x = 0
+        self.kd_y = 0
+        self.kd_z = 0
+        self.ki_vx = 0
+        self.ki_vy = 0
+        self.ki_vz = 0
+        self.kd_vx = 0
+        self.kd_vy = 0
+        self.kd_vz = 0
+
         self.vel_err_sum = np.zeros(3)
         self.vel_err_last_step = np.zeros(3)
         self.pos_err_sum = np.zeros(3)
@@ -169,7 +182,7 @@ class MavGNCPositionControl(MavGNCBase):
         self.current_t = 0
 
         self.g = 9.81
-        self.k_p_fb = 1.3
+        self.k_p_fb = 0.7
         self.k_v_fb = 3.5
         self.k_p_att_euler = [5, 5, 5]
 
@@ -245,7 +258,7 @@ class MavGNCPositionControl(MavGNCBase):
         self.hp = np.array([self.position_setpoint.pose.position.x,self.position_setpoint.pose.position.y,self.position_setpoint.pose.position.z])
         dis = self.current_position - self.hp
         
-        if np.linalg.norm(dis) < 0.1:
+        if np.linalg.norm(dis) < 0.2:
             self.status = 'Planning'
         else:
             self.status = 'Hover'
@@ -318,7 +331,7 @@ class MavGNCPositionControl(MavGNCBase):
         pos_err = position_cmd - self.current_position
         self.pos_err_sum += pos_err * 1.0/self.loop_freq
         velocity_cmd = np.array([self.velocity_setpoint.twist.linear.x,self.velocity_setpoint.twist.linear.y,self.velocity_setpoint.twist.linear.z])
-        position_cmd = self.vel_ff
+        # position_cmd = self.vel_ff
         vel_err = velocity_cmd - self.current_velocity
         self.vel_err_sum += vel_err * 1.0/self.loop_freq
 
@@ -327,6 +340,7 @@ class MavGNCPositionControl(MavGNCBase):
         psi = self.current_attitude[2]
         R_E_B = np.array([[cos(psi),sin(psi),0],[-sin(psi),cos(psi),0],[0,0,1]])
         vel_err = R_E_B@vel_err
+        pos_err = R_E_B@pos_err # ??????????????????????????????????????????????????????????????????????????????????????????????????????????
 
         phi = self.att_ff[0]
         theta = self.att_ff[1]
@@ -351,6 +365,8 @@ class MavGNCPositionControl(MavGNCBase):
         acc_des[1] += self.ki_y * self.pos_err_sum[1] + self.kd_y * (pos_err[1] - self.pos_err_last_step[1])*self.loop_freq
         acc_des[2] += self.ki_vz * self.vel_err_sum[2] + self.kd_vz * (vel_err[2] - self.vel_err_last_step[2])*self.loop_freq
         acc_des[2] += self.ki_z * self.pos_err_sum[2] + self.kd_z * (pos_err[2] - self.pos_err_last_step[2])*self.loop_freq
+        self.pos_err_last_step = pos_err
+        self.vel_err_last_step = vel_err
         if acc_des[2] < 0.01:
             acc_des[2] = 0.01
         z_b_des = np.array(acc_des / np.linalg.norm(acc_des))
@@ -363,8 +379,8 @@ class MavGNCPositionControl(MavGNCBase):
         self.phi_cmd = atan(R_E_B[2,1]/R_E_B[2,2])
         self.thrust_cmd = np.linalg.norm(acc_des)*0.68/self.g
 
-        self.theta_cmd = self.bound(self.theta_cmd,-0.55,0.55)
-        self.phi_cmd = self.bound(self.phi_cmd,-0.62,0.62)
+        self.theta_cmd = self.bound(self.theta_cmd,-0.7,0.7)
+        self.phi_cmd = self.bound(self.phi_cmd,-0.7,0.7)
         self.thrust_cmd = self.bound(self.thrust_cmd,0,0.95)
 
         # if abs(self.psi_cmd) > 1:
@@ -387,9 +403,14 @@ class MavGNCPositionControl(MavGNCBase):
         self.att_setpoint_euler.vector.z = self.psi_cmd/3.14*180
         self.att_setpoint_euler.header.stamp = rospy.Time.now()
 
-        self.attitude_euler.vector.x = self.current_attitude[0]/3.14*180
-        self.attitude_euler.vector.y = self.current_attitude[1]/3.14*180
-        self.attitude_euler.vector.z = self.current_attitude[2]/3.14*180
+        # self.attitude_euler.vector.x = self.current_attitude[0]/3.14*180
+        # self.attitude_euler.vector.y = self.current_attitude[1]/3.14*180
+        # self.attitude_euler.vector.z = self.current_attitude[2]/3.14*180
+
+        self.attitude_euler.vector.x = self.att_ff[0]/3.14*180
+        self.attitude_euler.vector.y = self.att_ff[1]/3.14*180
+        self.attitude_euler.vector.z = self.att_ff[2]/3.14*180
+
         self.attitude_euler.header.stamp = rospy.Time.now()
 
         self.vel_err_last_step = vel_err
@@ -414,7 +435,7 @@ class MavGNCPositionControl(MavGNCBase):
 
     def planner(self):
         self.pos_ff,self.vel_ff,self.thrust_ff,self.att_ff,self.rate_ff,is_done = self.ff_controller.set_forwardcontrol(self.current_t)
-        
+        # print(self.att_ff)
         self.position_setpoint.pose.position.x = self.pos_ff[0]
         self.position_setpoint.pose.position.y = self.pos_ff[1]
         self.position_setpoint.pose.position.z = self.pos_ff[2]
