@@ -113,18 +113,26 @@ class MavGNCPositionControl(MavGNCBase):
 
         self.ki_x = 0
         self.ki_y = 0
-        self.ki_z = 0
+        self.ki_z = 0.1
 
-        self.kd_x = 0.01
-        self.kd_y = 0.01
+        self.kd_x = 0.001
+        self.kd_y = 0.0015
+        self.kd_z = 0.0015
+
+        self.kd_x = 0
+        self.kd_y = 0
         self.kd_z = 0
 
         self.ki_vx = 0.1
-        self.ki_vy = 0.1
+        self.ki_vy = 0.15
         self.ki_vz = 0.2
 
-        self.kd_vx = 0.1
-        self.kd_vy = 0.1
+        self.kd_vx = 0.01
+        self.kd_vy = 0.015
+        self.kd_vz = 0.01
+
+        self.kd_vx = 0
+        self.kd_vy = 0
         self.kd_vz = 0
 
         self.vel_err_sum = np.zeros(3)
@@ -152,10 +160,10 @@ class MavGNCPositionControl(MavGNCBase):
         self.endy = 0
         self.endz = 0
 
-        self.cut_seg = 10
-        self.eight_turns = 5
-        self.eight_ax = 2
-        self.eight_ay = 3
+        self.cut_seg = 6
+        self.eight_turns = 2
+        self.eight_ax = 10
+        self.eight_ay = 16
         self.eight_t = 2*np.pi/self.cut_seg
         self.start_t = 0
         self.current_t = 0
@@ -165,9 +173,9 @@ class MavGNCPositionControl(MavGNCBase):
         self.k_v_fb = 3.5
         self.k_p_att_euler = [5, 5, 5]
 
-        self.vxmax = 1.1
-        self.vymax = 1.1
-        self.vzmax = 1.1
+        self.vxmax = 3.5
+        self.vymax = 3.5
+        self.vzmax = 3.5
 
 
         self.att_thread = Thread(target=self.send_att, args=())
@@ -213,25 +221,36 @@ class MavGNCPositionControl(MavGNCBase):
 
 
     def run(self):
-        x = np.zeros(self.cut_seg*self.eight_turns+1)
-        y = np.zeros(self.cut_seg*self.eight_turns+1)
-        z = np.zeros(self.cut_seg*self.eight_turns+1)
-        for i in range(self.cut_seg):
-            x[i+1] = self.eight_ax*cos(self.eight_t*i)/(1+sin(self.eight_t*i)*sin(self.eight_t*i))
-            y[i+1] = self.eight_ay*cos(self.eight_t*i)*sin(self.eight_t*i)/(1+sin(self.eight_t*i)*sin(self.eight_t*i))
-            z[i+1] = 1.5
-        for i in range(1,self.eight_turns):
-            for j in range(self.cut_seg):
-                x[i*self.cut_seg+1+j] = x[j+1]
-                y[i*self.cut_seg+1+j] = y[j+1]
-                z[i*self.cut_seg+1+j] = 1.5
+        # x = np.zeros(self.cut_seg*self.eight_turns+1)
+        # y = np.zeros(self.cut_seg*self.eight_turns+1)
+        # z = np.zeros(self.cut_seg*self.eight_turns+1)
+        # for i in range(self.cut_seg):
+        #     x[i+1] = self.eight_ax*cos(self.eight_t*i)/(1+sin(self.eight_t*i)*sin(self.eight_t*i))
+        #     y[i+1] = self.eight_ay*cos(self.eight_t*i)*sin(self.eight_t*i)/(1+sin(self.eight_t*i)*sin(self.eight_t*i))
+        #     z[i+1] = 4.5
+        # for i in range(1,self.eight_turns):
+        #     for j in range(self.cut_seg):
+        #         x[i*self.cut_seg+1+j] = x[j+1]
+        #         y[i*self.cut_seg+1+j] = y[j+1]
+        #         z[i*self.cut_seg+1+j] = 4.5
+
+        x = np.zeros(200)
+        y = np.zeros(200)
+        z = np.zeros(200)
+
+        for i in range(len(x)-1):
+            x[i+1] = 0
+            y[i+1] = 0.01 * i
+            z[i+1] = 4.5
+
         self.plan(x,y,z)
-        # # self.plan([0,5,5],[0,0,2],[0,2,3])
+
+        # self.plan([0,0],[0,0],[0,0.5])
+
         # self.plan([0,5,5,8,10],[0,0,2,-3,0],[0,2,3,7,8])
 
         while True:
-            self.current_time.data = time()-self.time_init
-            self.time_pub.publish(self.current_time)
+            
             if not self.ready_to_takeoff:
                 self.takeoff_preparation()
             else:
@@ -239,10 +258,12 @@ class MavGNCPositionControl(MavGNCBase):
                     self.start_t = time()
                     self.flag = 0
                 self.current_t = time()-self.start_t
+                self.current_time.data = self.current_t
+                self.time_pub.publish(self.current_time)
                 self.planner()
                 self.position_control()
                 self.velocity_control()
-
+            
             self.loop_rate.sleep()
 
 
@@ -273,13 +294,21 @@ class MavGNCPositionControl(MavGNCBase):
         # print(aref)
         phi = self.current_attitude[0]
         theta = self.current_attitude[1]
-        psi = self.current_attitude[2]
+        psi = 0
         R_E_B = np.array([[cos(psi),sin(psi),0],[-sin(psi),cos(psi),0],[0,0,1]])
         vel_err = R_E_B@vel_err
+        pos_err = R_E_B@pos_err
+
+        psi = self.current_attitude[2]
+        R_B_T = np.array([[cos(theta)*cos(psi),cos(theta)*sin(psi),-sin(theta)],\
+                          [sin(phi)*sin(theta)*cos(psi)-cos(phi)*sin(psi),sin(phi)*sin(theta)*sin(psi)+cos(phi)*cos(psi),sin(phi)*cos(theta)],\
+                          [cos(phi)*sin(theta)*cos(psi)+sin(phi)*sin(psi),cos(phi)*sin(theta)*sin(psi)-sin(phi)*cos(psi),cos(phi)*cos(theta)]])
+        psi = 0
+
+
         K_pos = np.array([[self.k_p_fb,0,0],[0,self.k_p_fb,0],[0,0,self.k_p_fb]])
         K_vel = np.array([[2,0,0],[0,2,0],[0,0,2]])
-        ades = aref + self.g*np.array([0,0,1]) + K_pos @ pos_err + K_vel @ vel_err
-                              
+        ades = aref + self.g*np.array([0,0,1]) + K_pos @ pos_err + K_vel @ vel_err                     
         acc_des = ades
         acc_des[0] += self.ki_vx * self.vel_err_sum[0] + self.kd_vx * (vel_err[0] - self.vel_err_last_step[0])*self.loop_freq
         acc_des[0] += self.ki_x * self.pos_err_sum[0] + self.kd_x * (pos_err[0] - self.pos_err_last_step[0])*self.loop_freq
@@ -287,6 +316,10 @@ class MavGNCPositionControl(MavGNCBase):
         acc_des[1] += self.ki_y * self.pos_err_sum[1] + self.kd_y * (pos_err[1] - self.pos_err_last_step[1])*self.loop_freq
         acc_des[2] += self.ki_vz * self.vel_err_sum[2] + self.kd_vz * (vel_err[2] - self.vel_err_last_step[2])*self.loop_freq
         acc_des[2] += self.ki_z * self.pos_err_sum[2] + self.kd_z * (pos_err[2] - self.pos_err_last_step[2])*self.loop_freq
+        self.pos_err_last_step = pos_err
+        self.vel_err_last_step = vel_err
+        if acc_des[2] < 0.01:
+            acc_des[2] = 0.01
         z_b_des = np.array(acc_des / np.linalg.norm(acc_des))
         y_c = np.array([-sin(psi),cos(psi),0])
         x_b_des = np.cross(y_c,z_b_des) / np.linalg.norm(np.cross(y_c,z_b_des))
@@ -295,7 +328,7 @@ class MavGNCPositionControl(MavGNCBase):
         # R_E_B = np.array([x_b_des,y_b_des,z_b_des])
         # self.att.orientation = Quaternion(*quaternion_from_matrix(R_E_B))
         R_E_B = np.transpose(np.array([x_b_des,y_b_des,z_b_des]))
-
+        # R_E_B = np.dot(R_E_B,R_B_T)
         self.psi_cmd = atan2(R_E_B[1,0],R_E_B[0,0])
         self.theta_cmd = asin(-R_E_B[2,0])
         self.phi_cmd = atan(R_E_B[2,1]/R_E_B[2,2])
@@ -312,7 +345,7 @@ class MavGNCPositionControl(MavGNCBase):
         self.phi_cmd = self.bound(self.phi_cmd,-0.62,0.62)
         self.thrust_cmd = self.bound(self.thrust_cmd,0,0.9)
 
-        psi = 0
+        # psi = 0
         yc = np.array([-sin(psi),cos(psi),0])
         tj = np.array([210*ts**4, 120*ts**3, 60*ts**2, 24*ts, 6, 0, 0, 0])
         xj = np.dot(tj, self.ax)
@@ -337,6 +370,13 @@ class MavGNCPositionControl(MavGNCBase):
         att_cmd = np.array([self.phi_cmd,self.theta_cmd,self.psi_cmd])
         w_fb = self.k_p_att_euler * (att_cmd - self.current_attitude)
         w_cmd = w + w_fb
+        # Rw = self.eulerAngles2rotationMat(w_cmd)
+        # R_E_B = np.dot(Rw,R_B_T)
+        # w_cmd[0] = atan2(R_E_B[1,0],R_E_B[0,0])
+        # w_cmd[1] = asin(-R_E_B[2,0])
+        # w_cmd[2] = atan(R_E_B[2,1]/R_E_B[2,2])
+
+        # w_cmd = R_B_T @ w_cmd
         self.att.orientation = Quaternion(*quaternion_from_euler(self.phi_cmd,self.theta_cmd,self.psi_cmd))
         self.att.thrust = self.thrust_cmd
         self.att.body_rate.x = w_cmd[0]
@@ -357,6 +397,25 @@ class MavGNCPositionControl(MavGNCBase):
 
         self.vel_err_last_step = vel_err
 
+
+    def eulerAngles2rotationMat(self,theta):
+    
+        R_x = np.array([[1, 0, 0],
+                        [0, math.cos(theta[0]), -math.sin(theta[0])],
+                        [0, math.sin(theta[0]), math.cos(theta[0])]
+                        ])
+    
+        R_y = np.array([[math.cos(theta[1]), 0, math.sin(theta[1])],
+                        [0, 1, 0],
+                        [-math.sin(theta[1]), 0, math.cos(theta[1])]
+                        ])
+    
+        R_z = np.array([[math.cos(theta[2]), -math.sin(theta[2]), 0],
+                        [math.sin(theta[2]), math.cos(theta[2]), 0],
+                        [0, 0, 1]
+                        ])
+        R = np.dot(np.dot(R_x, R_y), R_z)
+        return R
 
 
     def position_control(self):
@@ -449,12 +508,15 @@ class MavGNCPositionControl(MavGNCBase):
 
     def init_ts(self, waypointx, waypointy, waypointz):
         # to be ++++++++++++++++++
-        self.tss = np.ones(self.n_seg)        
-        for i in range(1,len(self.tss)):
-            t1 = abs(waypointx[i+1]-waypointx[i]) / self.vxmax
-            t2 = abs(waypointy[i+1]-waypointy[i]) / self.vymax
-            t3 = abs(waypointz[i+1]-waypointz[i]) / self.vzmax
-            self.tss[i] = max(t1,max(t2,t3))
+        self.tss = np.ones(self.n_seg) * 0.004
+        # self.tss = np.ones(self.n_seg) * 5
+
+        # for i in range(1,len(self.tss)):
+        #     t1 = abs(waypointx[i+1]-waypointx[i]) / self.vxmax
+        #     t2 = abs(waypointy[i+1]-waypointy[i]) / self.vymax
+        #     t3 = abs(waypointz[i+1]-waypointz[i]) / self.vzmax
+        #     self.tss[i] = max(t1,max(t2,t3))
+
         self.tss[0] = 10
         self.tsa = np.zeros(self.n_seg+1)
         for i in range(1, len(self.tsa)):
