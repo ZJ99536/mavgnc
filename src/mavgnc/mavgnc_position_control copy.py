@@ -111,17 +111,17 @@ class MavGNCPositionControl(MavGNCBase):
         self.kp_vy = -0.3
         self.kp_vz = 0.5
 
-        self.ki_x = 0.05
+        self.ki_x = 0
         self.ki_y = 0
         self.ki_z = 0.1
 
-        # self.kd_x = 0.001
-        # self.kd_y = 0.0015
-        # self.kd_z = 0.0015
+        self.kd_x = 0.001
+        self.kd_y = 0.0015
+        self.kd_z = 0.0015
 
-        self.kd_x = 0
-        self.kd_y = 0
-        self.kd_z = 0
+        # self.kd_x = 0
+        # self.kd_y = 0
+        # self.kd_z = 0
 
         self.ki_vx = 0.1
         self.ki_vy = 0.15
@@ -169,7 +169,7 @@ class MavGNCPositionControl(MavGNCBase):
         self.current_t = 0
 
         self.g = 9.81
-        self.k_p_fb = 2
+        self.k_p_fb = 1.3
         self.k_v_fb = 3.5
         self.k_p_att_euler = [5, 5, 5]
 
@@ -178,9 +178,9 @@ class MavGNCPositionControl(MavGNCBase):
         self.vzmax = 3.5
 
 
-        self.att_thread = Thread(target=self.send_att, args=())
-        self.att_thread.daemon = True
-        self.att_thread.start()
+        # self.att_thread = Thread(target=self.send_att, args=())
+        # self.att_thread.daemon = True
+        # self.att_thread.start()
         self.loop_freq = 200
         self.loop_rate = rospy.Rate(self.loop_freq)
 
@@ -202,22 +202,22 @@ class MavGNCPositionControl(MavGNCBase):
     #
     # Helper methods
     #
-    def send_att(self):
-        rate = rospy.Rate(200)  # Hz
-        self.att.header = Header()
-        self.att.header.frame_id = "base_footprint"
+    # def send_att(self):
+    #     rate = rospy.Rate(200)  # Hz
+    #     self.att.header = Header()
+    #     self.att.header.frame_id = "base_footprint"
 
-        while not rospy.is_shutdown():
-            self.att_setpoint_pub.publish(self.att)
-            self.vel_setpoint_pub.publish(self.velocity_setpoint)
-            self.pos_setpoint_pub.publish(self.position_setpoint)
-            self.att_euler_pub.publish(self.attitude_euler)
-            self.att_sp_euler_pub.publish(self.att_setpoint_euler)
-            try:  # prevent garbage in console output when thread is killed
-                rate.sleep()
-            except rospy.ROSInterruptException:
-                pass
-        pass
+    #     while not rospy.is_shutdown():
+    #         self.att_setpoint_pub.publish(self.att)
+    #         self.vel_setpoint_pub.publish(self.velocity_setpoint)
+    #         self.pos_setpoint_pub.publish(self.position_setpoint)
+    #         self.att_euler_pub.publish(self.attitude_euler)
+    #         self.att_sp_euler_pub.publish(self.att_setpoint_euler)
+    #         try:  # prevent garbage in console output when thread is killed
+    #             rate.sleep()
+    #         except rospy.ROSInterruptException:
+    #             pass
+    #     pass
 
 
     def run(self):
@@ -234,23 +234,23 @@ class MavGNCPositionControl(MavGNCBase):
         #         y[i*self.cut_seg+1+j] = y[j+1]
         #         z[i*self.cut_seg+1+j] = 4.5
 
-        # x = np.zeros(50)
-        # y = np.zeros(50)
-        # z = np.zeros(50)
+        x = np.zeros(50)
+        y = np.zeros(50)
+        z = np.zeros(50)
 
-        # for i in range(2):
-        #     x[i+1] = 0
-        #     y[i+1] = 0
-        #     z[i+1] = 4.5
+        for i in range(2):
+            x[i+1] = 0
+            y[i+1] = 0
+            z[i+1] = 4.5
 
-        # for i in range(len(x)-3):
-        #     x[i+3] = 0
-        #     y[i+3] = i*2
-        #     z[i+3] = 4.5
+        for i in range(len(x)-3):
+            x[i+3] = 0
+            y[i+3] = i*2
+            z[i+3] = 4.5
 
-        # self.plan(x,y,z)
+        self.plan(x,y,z)
 
-        self.plan([0,0,0],[0,0,4],[0,2,3])
+        # self.plan([0,0],[0,0],[0,0.5])
 
         # self.plan([0,5,5,8,10],[0,0,2,-3,0],[0,2,3,7,8])
 
@@ -259,6 +259,7 @@ class MavGNCPositionControl(MavGNCBase):
             if not self.ready_to_takeoff:
                 self.takeoff_preparation()
             else:
+                # print(111111111111)
                 if self.flag:
                     self.start_t = time()
                     self.flag = 0
@@ -268,7 +269,14 @@ class MavGNCPositionControl(MavGNCBase):
                 self.planner()
                 self.position_control()
                 self.velocity_control()
-            
+                self.att.header = Header()
+                self.att.header.frame_id = "base_footprint"
+                self.att_setpoint_pub.publish(self.att)
+                # print(self.att.body_rate.x)
+                self.vel_setpoint_pub.publish(self.velocity_setpoint)
+                self.pos_setpoint_pub.publish(self.position_setpoint)
+                self.att_euler_pub.publish(self.attitude_euler)
+                self.att_sp_euler_pub.publish(self.att_setpoint_euler)         
             self.loop_rate.sleep()
 
 
@@ -301,8 +309,8 @@ class MavGNCPositionControl(MavGNCBase):
         theta = self.current_attitude[1]
         psi = 0
         R_E_B = np.array([[cos(psi),sin(psi),0],[-sin(psi),cos(psi),0],[0,0,1]])
-        # vel_err = R_E_B@vel_err
-        # pos_err = R_E_B@pos_err
+        vel_err = R_E_B@vel_err
+        pos_err = R_E_B@pos_err
 
         psi = self.current_attitude[2]
         R_B_T = np.array([[cos(theta)*cos(psi),cos(theta)*sin(psi),-sin(theta)],\
@@ -513,7 +521,7 @@ class MavGNCPositionControl(MavGNCBase):
 
     def init_ts(self, waypointx, waypointy, waypointz):
         # to be ++++++++++++++++++
-        self.tss = np.ones(self.n_seg) * 5
+        self.tss = np.ones(self.n_seg) * 0.5
         # self.tss = np.ones(self.n_seg) * 5
 
         # for i in range(1,len(self.tss)):
@@ -522,11 +530,11 @@ class MavGNCPositionControl(MavGNCBase):
         #     t3 = abs(waypointz[i+1]-waypointz[i]) / self.vzmax
         #     self.tss[i] = max(t1,max(t2,t3))
 
-        self.tss[0] = 10
-        # self.tss[1] = 5
-        # self.tss[2] = 5
-        # self.tss[3] = 0.75
-        # self.tss[-1] = 0.75
+        self.tss[0] = 5
+        self.tss[1] = 5
+        self.tss[2] = 5
+        self.tss[3] = 0.75
+        self.tss[-1] = 0.75
         self.tsa = np.zeros(self.n_seg+1)
         for i in range(1, len(self.tsa)):
             self.tsa[i] = self.tsa[i-1] + self.tss[i-1]
